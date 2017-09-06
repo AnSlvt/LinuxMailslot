@@ -11,6 +11,8 @@
 #include <linux/time.h>
 #include <linux/version.h>
 
+#include <asm/ioctl.h>
+
 #include "macro.h"
 
 #include "mailslot_vector.h"
@@ -20,6 +22,11 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andrea Salvati");
 
+/*#define IOCTL_MAGIC 0xF7
+#define SEQUENCE_CMD_BLOCKING 0x0001
+#define SEQUENCE_CMD_NONBLOCKIN 0x0010
+#define NONE_DIRECTION 0x000000 | _IOC_NONE*/
+
 static int Major;
 
 mailslot_vector_t mailslots;
@@ -27,19 +34,13 @@ mailslot_vector_t mailslots;
 static int open_mailslot_instance(struct inode *inode, struct file *file)
 {
     int device_instance = MINOR(inode->i_rdev);
-    mailslot_t mailslot;
 
     printk("%s: somebody called an open on the mailslot istance [major,minor] number [%d,%d]\n", 
         DEVICE_NAME, 
         MAJOR(inode->i_rdev), 
         device_instance);
 
-    if (get_mailslot(mailslots, device_instance) == NULL)
-    {
-        printk("%s: found NULL as mailslot instance number %d\n", DEVICE_NAME, device_instance);
-        mailslot = create_new_mailslot(mailslots, device_instance);
-    }
-    else printk("%s: device instance %d already present", DEVICE_NAME, device_instance);
+    create_new_mailslot(mailslots, device_instance);
 
     return 0;
 }
@@ -47,7 +48,6 @@ static int open_mailslot_instance(struct inode *inode, struct file *file)
 static int mailslot_instance_release(struct inode *inode, struct file *file)
 {
     int device_instance = MINOR(inode->i_rdev);
-    int i;
     mailslot_t to_release;
 
     printk("%s: somebody called a release on the mailslot istance [major,minor] number [%d,%d]\n", 
@@ -57,17 +57,9 @@ static int mailslot_instance_release(struct inode *inode, struct file *file)
 
     if ((to_release = get_mailslot(mailslots, device_instance)) != NULL)
     {
-        printk("%s: going to release device instance %d", DEVICE_NAME, device_instance);
-        for (i = 0; i < get_mails_in(to_release); i++)
-        {
-            printk("%s: removing mail number %d of %d", DEVICE_NAME, i, to_release->mails_in);
-            kfree(get_mail(to_release, i));
-        }
-        kfree(to_release);
-
+        free_mailslot(to_release);
         remove_mailslot_instance(mailslots, device_instance);
     }
-    else printk("%s: nothing to release %d", DEVICE_NAME, device_instance);
 
    return 0;
 }
@@ -83,9 +75,14 @@ static ssize_t write_on_mailslot(struct file *filp, const char *buff, size_t len
         MAJOR(filp->f_inode->i_rdev), 
         device_instance);
 
-    if (!is_length_compatible(mailslot, len) || !there_is_space(mailslot)) return -1;
+    //if (!is_length_compatible(mailslot, len) || !there_is_space(mailslot)) return -1;
 
     mail = create_new_msg(mailslot, buff, len);
+    if (mail == NULL)
+    {
+        printk("%s: the length of the message is not compatible with the mailslot\n", DEVICE_NAME);
+        return 0;
+    }
     insert_new_msg(mailslot, mail);
 
     return len;
@@ -97,7 +94,7 @@ static ssize_t read_from_mailslot(struct file *filp, char *buff, size_t len, lof
     mailslot_t mailslot = get_mailslot(mailslots, device_instance);
     int ret;
 
-    printk("%s: somebody called a read on the mailslot istance [majors,minor] number [%d,%d] and wants to read %d bytes\n", 
+    printk("%s: somebody called a read on the mailslot istance [majors,minor] number [%d,%d] and wants to read %lu bytes\n", 
         DEVICE_NAME, 
         MAJOR(filp->f_inode->i_rdev), 
         device_instance, len);
@@ -107,12 +104,20 @@ static ssize_t read_from_mailslot(struct file *filp, char *buff, size_t len, lof
     return ret;
 }
 
+/*static long ioctl_mailslot(/*struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    unsigned int cmd_switch_flag = IOCTL_MAGIC | SEQUENCE_CMD_BLOCKING | NONE_DIRECTION;
+    printk("%s: switch flag %d\n", DEVICE_NAME, cmd_switch_flag);
+
+    return 0;
+}*/
+
 static struct file_operations fops = {
     .open    = open_mailslot_instance,
     .write   = write_on_mailslot,
     .read    = read_from_mailslot,
-    .release = mailslot_instance_release
-    // .ioctl   = 
+    .release = mailslot_instance_release//,
+    //.unlocked_ioctl   = ioctl_mailslot
 };
 
 

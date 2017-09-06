@@ -7,7 +7,7 @@
 #include <errno.h>
 #include <sys/sysmacros.h>
 #include <string.h>
-
+#include <sys/ioctl.h>
 
 #define PATH_NAME "../mail"
 
@@ -34,6 +34,8 @@ int main(int argc, char const *argv[])
         fprintf(stderr, "open failed, %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
+
+    ioctl(fd, 1);
 
     fd = ret;
     ret = write(fd, buff, 5);
