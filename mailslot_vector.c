@@ -25,7 +25,6 @@ struct mailslot_vector_s *create_new_mailslot_vector()
         goto end;
     }
     mailslots->number_of_instances = 0;
-    mailslots->next = 0;
     memset(mailslots->mailslot_instances, 0, MINORS);
 
     printk("Initializing the semaphores");
@@ -49,7 +48,6 @@ bool_t insert_new_mailslot(struct mailslot_vector_s *mailslot_vector, int device
     {
         mailslot_vector->mailslot_instances[device_instance] = mailslot;
         mailslot_vector->number_of_instances += 1;
-        mailslot_vector->next += 1;
         inserted = TRUE;
     }
     RELEASE_MUTEX(device_instance);
@@ -59,12 +57,10 @@ bool_t insert_new_mailslot(struct mailslot_vector_s *mailslot_vector, int device
 
 void remove_mailslot_instance(mailslot_vector_t mailslot_vector, int device_instance)
 {
-    // TODO: fix it
     LOCK_MUTEX(device_instance);
     if (mailslot_vector->mailslot_instances[device_instance] != NULL)
     {
         mailslot_vector->mailslot_instances[device_instance] = NULL;
-        mailslot_vector->next = device_instance;
         mailslot_vector->number_of_instances -= 1;
     }
     RELEASE_MUTEX(device_instance);

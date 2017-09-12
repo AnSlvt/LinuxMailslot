@@ -3,6 +3,8 @@
 #ifndef MAILSLOT_H
 #define MAILSLOT_H
 
+typedef enum { BLOCKING, NON_BLOCKING } mailslot_behaviour_t;
+
 struct mailslot_s
 {
     struct msg_obj_s **mails;
@@ -12,6 +14,9 @@ struct mailslot_s
     struct semaphore *full;     /* keep track of the number of full spots */
     struct semaphore *empty;    /* keep track of the number of empty spots */
     spinlock_t *mailslot_sync;  /* enforce mutual exclusion to shared data */
+
+    mailslot_behaviour_t behaviour;
+    int open_instances;
 
     int current_max_msgs;
     int current_msg_size;
@@ -25,6 +30,8 @@ void create_new_mailslot(mailslot_vector_t mailslots, int device_instance);
 void insert_new_msg(mailslot_t mailslot, struct msg_obj_s *msg);
 
 int read_msg(mailslot_t mailslot, char *buff, int len);
+
+void set_behaviour(mailslot_t mailslot, mailslot_behaviour_t new_behaviour);
 
 //struct msg_obj_s *get_mail(mailslot_t mailslot, int position);
 

@@ -11,6 +11,8 @@
 
 #include "macro.h"
 
+#define IS_BLOCKING mailslot->behaviour == BLOCKING
+
 void create_new_mailslot(mailslot_vector_t mailslots, int device_instance)
 {
     // Mailslot initialization
@@ -29,6 +31,8 @@ void create_new_mailslot(mailslot_vector_t mailslots, int device_instance)
     mailslot->mailslot_sync = kmalloc(sizeof(spinlock_t), GFP_KERNEL);
     mailslot->current_max_msgs = DEFAULT_MAX_MSG;
     mailslot->mails_in = 0;
+    mailslot->behaviour = BLOCKING;
+    mailslot->open_instances = 1;
 
     sema_init(mailslot->empty, mailslot->current_max_msgs);
     sema_init(mailslot->full, 0);
@@ -43,19 +47,27 @@ void create_new_mailslot(mailslot_vector_t mailslots, int device_instance)
         kfree(mailslot->full);
         kfree(mailslot->mailslot_sync);
         kfree(mailslot);
+
+        mailslot = get_mailslot(mailslots, device_instance);
+        mailslot->open_instances += 1;
     }
     else printk("%s: new mailslot created and succesfully inserted in %d\n", DEVICE_NAME, device_instance);
 }
 
 void insert_new_msg(struct mailslot_s *mailslot, msg_obj_t msg)
 {
-    down(mailslot->empty);
+    if (IS_BLOCKING) down(mailslot->empty);
     spin_lock(mailslot->mailslot_sync);
+
+    if (!(IS_BLOCKING) && mailslot->mails_in == mailslot->current_max_msgs) goto full;
+
     mailslot->mails[mailslot->next_to_insert] = msg;
     mailslot->mails_in += 1;
     mailslot->next_to_insert = (mailslot->next_to_insert + 1) % mailslot->current_max_msgs;
+
+full:
     spin_unlock(mailslot->mailslot_sync);
-    up(mailslot->full);
+    if (IS_BLOCKING) up(mailslot->full);
 }
 
 int read_msg(struct mailslot_s *mailslot, char *buff, int len)
@@ -63,9 +75,9 @@ int read_msg(struct mailslot_s *mailslot, char *buff, int len)
     int ret = 0;
     msg_obj_t to_read;
 
-    down(mailslot->full);
+    if (IS_BLOCKING) down(mailslot->full);
     spin_lock(mailslot->mailslot_sync);
-    if (mailslot->mails_in == 0) goto empty;
+    if (!(IS_BLOCKING) && mailslot->mails_in == 0) goto empty;
 
     to_read = mailslot->mails[mailslot->next_to_read];
 
@@ -81,7 +93,7 @@ int read_msg(struct mailslot_s *mailslot, char *buff, int len)
 
 empty:
     spin_unlock(mailslot->mailslot_sync);
-    up(mailslot->empty);
+    if (IS_BLOCKING) up(mailslot->empty);
     return ret;
 }
 
@@ -93,7 +105,18 @@ void free_mailslot(mailslot_t mailslot)
     {
         free_msg(mailslot->mails[i]);
     }
+    kfree(mailslot->mails);
+    kfree(mailslot->empty);
+    kfree(mailslot->full);
+    kfree(mailslot->mailslot_sync);
     kfree(mailslot);
+}
+
+void set_behaviour(mailslot_t mailslot, mailslot_behaviour_t new_behaviour)
+{
+    spin_lock(mailslot->mailslot_sync);
+    mailslot->behaviour = new_behaviour;
+    spin_unlock(mailslot->mailslot_sync);
 }
 
 /*struct msg_obj_s *get_mail(mailslot_t mailslot, int position)

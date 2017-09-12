@@ -22,10 +22,12 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andrea Salvati");
 
-/*#define IOCTL_MAGIC 0xF7
-#define SEQUENCE_CMD_BLOCKING 0x0001
-#define SEQUENCE_CMD_NONBLOCKIN 0x0010
-#define NONE_DIRECTION 0x000000 | _IOC_NONE*/
+#define IOCTL_MAGIC 0xF70000
+#define SEQUENCE_CMD_BLOCKING 0x000100
+#define SEQUENCE_CMD_NONBLOCKING 0x001000
+
+#define BLOCKING_CMD IOCTL_MAGIC | SEQUENCE_CMD_BLOCKING | _IOC_NONE
+#define NONBLOCKING_CMD IOCTL_MAGIC | SEQUENCE_CMD_NONBLOCKING | _IOC_NONE
 
 static int Major;
 
@@ -55,8 +57,9 @@ static int mailslot_instance_release(struct inode *inode, struct file *file)
         MAJOR(inode->i_rdev), 
         device_instance);
 
-    if ((to_release = get_mailslot(mailslots, device_instance)) != NULL)
+    if ((to_release = get_mailslot(mailslots, device_instance)) != NULL && (--(to_release->open_instances) == 0))
     {
+        printk("%s: last instance of mailslot %d, going to free\n", DEVICE_NAME, device_instance);
         free_mailslot(to_release);
         remove_mailslot_instance(mailslots, device_instance);
     }
@@ -74,8 +77,6 @@ static ssize_t write_on_mailslot(struct file *filp, const char *buff, size_t len
         DEVICE_NAME, 
         MAJOR(filp->f_inode->i_rdev), 
         device_instance);
-
-    //if (!is_length_compatible(mailslot, len) || !there_is_space(mailslot)) return -1;
 
     mail = create_new_msg(mailslot, buff, len);
     if (mail == NULL)
@@ -104,20 +105,51 @@ static ssize_t read_from_mailslot(struct file *filp, char *buff, size_t len, lof
     return ret;
 }
 
-/*static long ioctl_mailslot(/*struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
+static int ioctl_mailslot(struct inode *inode, struct file *filp, unsigned int cmd, unsigned long arg)
+#else
+static long ioctl_mailslot(struct file *filp, unsigned int cmd, unsigned long arg)
+#endif
 {
-    unsigned int cmd_switch_flag = IOCTL_MAGIC | SEQUENCE_CMD_BLOCKING | NONE_DIRECTION;
-    printk("%s: switch flag %d\n", DEVICE_NAME, cmd_switch_flag);
+    int device_instance = MINOR(filp->f_inode->i_rdev);
+    mailslot_t to_customize = get_mailslot(mailslots, device_instance);
+
+    unsigned int blocking_cmd = 0;
+    unsigned int non_blocking_cmd = 0;
+    blocking_cmd |= BLOCKING_CMD;
+    non_blocking_cmd |= NONBLOCKING_CMD;
+
+    printk("%s: ioctl received on instance %d, the cmd is %d, the commands are %d, %d\n", DEVICE_NAME, device_instance, cmd, blocking_cmd, non_blocking_cmd);
+
+    if (cmd == blocking_cmd)
+    {
+        printk("%s: customizing the running behaviour of mailslot instance %d - new behaviour %d\n", DEVICE_NAME, device_instance, BLOCKING);
+        set_behaviour(to_customize, BLOCKING);
+    }
+    else if (cmd == non_blocking_cmd)
+    {
+        printk("%s: customizing the running behaviour of mailslot instance %d - new behaviour %d\n", DEVICE_NAME, device_instance, NON_BLOCKING);
+        set_behaviour(to_customize, NON_BLOCKING);
+    }
+    else
+    {
+        printk("%s: cmd not recognized\n", DEVICE_NAME);
+        return -1;
+    }
 
     return 0;
-}*/
+}
 
 static struct file_operations fops = {
     .open    = open_mailslot_instance,
     .write   = write_on_mailslot,
     .read    = read_from_mailslot,
-    .release = mailslot_instance_release//,
-    //.unlocked_ioctl   = ioctl_mailslot
+    .release = mailslot_instance_release,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35))
+    .ioctl = ioctl_mailslot
+#else
+    .unlocked_ioctl = ioctl_mailslot
+#endif
 };
 
 
