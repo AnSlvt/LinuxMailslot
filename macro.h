@@ -2,7 +2,7 @@
 #define __MACRO_H
 
 #define MINORS 256
-#define DEFAULT_MAX_MSG 256
+#define DEFAULT_MAX_MSG 30
 #define DEFAULT_MAX_MSG_SIZE 256
 #define DEVICE_NAME "mail_slot"
 

@@ -1,7 +1,6 @@
 #include <asm/uaccess.h>
 #include <linux/slab.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
+#include <linux/errno.h>
 #include <linux/spinlock.h>
 #include <linux/semaphore.h>
 
@@ -23,13 +22,13 @@ void create_new_mailslot(mailslot_vector_t mailslots, int device_instance)
         return;
     }
     mailslot->current_msg_size = DEFAULT_MAX_MSG_SIZE;
-    mailslot->mails = kmalloc(mailslot->current_msg_size * sizeof(struct msg_obj_s), GFP_KERNEL);
+    mailslot->current_max_msgs = DEFAULT_MAX_MSG;
+    mailslot->mails = kmalloc(mailslot->current_max_msgs * sizeof(struct msg_obj_s), GFP_KERNEL);
     mailslot->next_to_read = 0;
     mailslot->next_to_insert = 0;
     mailslot->empty = kmalloc(sizeof(struct semaphore), GFP_KERNEL);
     mailslot->full = kmalloc(sizeof(struct semaphore), GFP_KERNEL);
     mailslot->mailslot_sync = kmalloc(sizeof(spinlock_t), GFP_KERNEL);
-    mailslot->current_max_msgs = DEFAULT_MAX_MSG;
     mailslot->mails_in = 0;
     mailslot->behaviour = BLOCKING;
     mailslot->open_instances = 1;
@@ -56,28 +55,39 @@ void create_new_mailslot(mailslot_vector_t mailslots, int device_instance)
 
 void insert_new_msg(struct mailslot_s *mailslot, msg_obj_t msg)
 {
-    if (IS_BLOCKING) down(mailslot->empty);
-    spin_lock(mailslot->mailslot_sync);
+    int locked = 0;
 
-    if (!(IS_BLOCKING) && mailslot->mails_in == mailslot->current_max_msgs) goto full;
+    if (IS_BLOCKING) down(mailslot->empty);
+    else
+    {
+        locked = down_trylock(mailslot->empty);
+        if (locked != 0) goto full;
+    }
+    spin_lock(mailslot->mailslot_sync);
 
     mailslot->mails[mailslot->next_to_insert] = msg;
     mailslot->mails_in += 1;
     mailslot->next_to_insert = (mailslot->next_to_insert + 1) % mailslot->current_max_msgs;
 
-full:
     spin_unlock(mailslot->mailslot_sync);
-    if (IS_BLOCKING) up(mailslot->full);
+
+full:
+    if (locked == 0) up(mailslot->full);
 }
 
 int read_msg(struct mailslot_s *mailslot, char *buff, int len)
 {
     int ret = 0;
+    int locked = 1;
     msg_obj_t to_read;
 
     if (IS_BLOCKING) down(mailslot->full);
+    else
+    {
+        locked = down_trylock(mailslot->full);
+        if (locked != 0) goto empty;
+    }
     spin_lock(mailslot->mailslot_sync);
-    if (!(IS_BLOCKING) && mailslot->mails_in == 0) goto empty;
 
     to_read = mailslot->mails[mailslot->next_to_read];
 
@@ -91,9 +101,10 @@ int read_msg(struct mailslot_s *mailslot, char *buff, int len)
 
     printk("%s: read %s of %d bytes\n", DEVICE_NAME, buff, ret);
 
-empty:
     spin_unlock(mailslot->mailslot_sync);
-    if (IS_BLOCKING) up(mailslot->empty);
+    up(mailslot->empty);
+
+empty:
     return ret;
 }
 
@@ -117,6 +128,34 @@ void set_behaviour(mailslot_t mailslot, mailslot_behaviour_t new_behaviour)
     spin_lock(mailslot->mailslot_sync);
     mailslot->behaviour = new_behaviour;
     spin_unlock(mailslot->mailslot_sync);
+}
+
+void change_msg_max_size(mailslot_t mailslot, int new_size)
+{
+    spin_lock(mailslot->mailslot_sync);
+    mailslot->current_msg_size = new_size;
+    spin_unlock(mailslot->mailslot_sync);
+}
+
+int increase_max_number_of_msgs(mailslot_t mailslot, int new_size)
+{
+    int ret = 0, i, old_size;
+    spin_lock(mailslot->mailslot_sync);
+
+    if (new_size <= mailslot->current_max_msgs) ret = -EINVAL;
+    else
+    {
+        // I have more space in the buffer - first realloc the buffer and then unlock all the writers 
+        // that want to use the new space
+        old_size = mailslot->current_max_msgs;
+        mailslot->current_max_msgs = new_size;
+        krealloc(mailslot->mails, new_size, GFP_KERNEL);
+        for (i = old_size; i < new_size; i++)
+            up(mailslot->empty);
+    }
+
+    spin_unlock(mailslot->mailslot_sync);
+    return ret;
 }
 
 /*struct msg_obj_s *get_mail(mailslot_t mailslot, int position)

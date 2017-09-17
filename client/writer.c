@@ -11,13 +11,21 @@
 
 #define PATH_NAME "../mail"
 
+#define IOCTL_MAGIC 0xF70000
+#define SEQUENCE_CMD_BLOCKING 0x000100
+#define SEQUENCE_CMD_NONBLOCKING 0x001000
+#define SEQUENCE_CMD_CHANGE_MSG_SIZE 0x001100
+
+#define BLOCKING_CMD IOCTL_MAGIC | SEQUENCE_CMD_BLOCKING | 0U
+#define NONBLOCKING_CMD IOCTL_MAGIC | SEQUENCE_CMD_NONBLOCKING | 0U
+#define CHANGE_MSG_SIZE_CMD IOCTL_MAGIC | SEQUENCE_CMD_CHANGE_MSG_SIZE | 0U
+
 
 int main(int argc, char const *argv[])
 {
-    int ret, fd;
+    int ret, fd, i;
     dev_t dev;
-    char *buff = "ciao";
-    char read_value[5];
+    char *buff = malloc(sizeof(256 * sizeof(char)));
 
     dev = makedev(245, 0);
 
@@ -27,7 +35,7 @@ int main(int argc, char const *argv[])
         fprintf(stderr, "Something gone wrong, %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     }
-    
+
     ret = open(PATH_NAME, O_RDWR);
     if (ret == -1)
     {
@@ -35,17 +43,18 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE);
     }
 
-    ioctl(fd, 1);
-
     fd = ret;
-    ret = write(fd, buff, 5);
-    ret = write(fd, buff, 5);
-    ret = write(fd, buff, 5);
 
-    ret = read(fd, read_value, 5);
+    ioctl(fd, NONBLOCKING_CMD, 0);
+    ioctl(fd, CHANGE_MSG_SIZE_CMD, 5);
 
-    printf("Wrote %s get %s\n", buff, read_value);
-
+    while (1)
+    {
+        scanf("%s", buff);
+        ret = write(fd, buff, strlen(buff) + 1);
+        if (ret == 0) printf("Message limit exceeded\n");
+        else printf("Wrote!\n");
+    }
     getchar();
 
     close(fd);

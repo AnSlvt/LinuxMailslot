@@ -1,4 +1,5 @@
 #define EXPORT_SYMTAB
+#include <asm/ioctl.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/errno.h>
@@ -8,10 +9,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/time.h>
 #include <linux/version.h>
-
-#include <asm/ioctl.h>
 
 #include "macro.h"
 
@@ -25,9 +23,15 @@ MODULE_AUTHOR("Andrea Salvati");
 #define IOCTL_MAGIC 0xF70000
 #define SEQUENCE_CMD_BLOCKING 0x000100
 #define SEQUENCE_CMD_NONBLOCKING 0x001000
+#define SEQUENCE_CMD_CHANGE_MSG_SIZE 0x001100
+#define SEQUENCE_CMD_INCREASE_MAX_MSGS 0x010000
+#define SEQUENCE_CMD_DECREASE_MAX_MSGS 0x010100
 
 #define BLOCKING_CMD IOCTL_MAGIC | SEQUENCE_CMD_BLOCKING | _IOC_NONE
 #define NONBLOCKING_CMD IOCTL_MAGIC | SEQUENCE_CMD_NONBLOCKING | _IOC_NONE
+#define CHANGE_MSG_SIZE_CMD IOCTL_MAGIC | SEQUENCE_CMD_CHANGE_MSG_SIZE | _IOC_NONE
+#define INCREASE_MAX_MSGS_CMD IOCTL_MAGIC | SEQUENCE_CMD_INCREASE_MAX_MSGS | _IOC_NONE
+#define DECREASE_MAX_MSGS_CMD IOCTL_MAGIC | SEQUENCE_CMD_DECREASE_MAX_MSGS | _IOC_NONE
 
 static int Major;
 
@@ -114,29 +118,50 @@ static long ioctl_mailslot(struct file *filp, unsigned int cmd, unsigned long ar
     int device_instance = MINOR(filp->f_inode->i_rdev);
     mailslot_t to_customize = get_mailslot(mailslots, device_instance);
 
-    unsigned int blocking_cmd = 0;
-    unsigned int non_blocking_cmd = 0;
-    blocking_cmd |= BLOCKING_CMD;
-    non_blocking_cmd |= NONBLOCKING_CMD;
+    unsigned int blocking_cmd = BLOCKING_CMD;
+    unsigned int non_blocking_cmd = NONBLOCKING_CMD;
+    unsigned int change_max_msg_size = CHANGE_MSG_SIZE_CMD;
+    unsigned int increase_max_msgs = INCREASE_MAX_MSGS_CMD;
 
-    printk("%s: ioctl received on instance %d, the cmd is %d, the commands are %d, %d\n", DEVICE_NAME, device_instance, cmd, blocking_cmd, non_blocking_cmd);
+    printk("%s: ioctl received on instance %d, the cmd is %d", DEVICE_NAME, device_instance, cmd);
 
     if (cmd == blocking_cmd)
     {
         printk("%s: customizing the running behaviour of mailslot instance %d - new behaviour %d\n", DEVICE_NAME, device_instance, BLOCKING);
         set_behaviour(to_customize, BLOCKING);
+        goto success;
     }
     else if (cmd == non_blocking_cmd)
     {
         printk("%s: customizing the running behaviour of mailslot instance %d - new behaviour %d\n", DEVICE_NAME, device_instance, NON_BLOCKING);
         set_behaviour(to_customize, NON_BLOCKING);
+        goto success;
+    }
+    else if (cmd == change_max_msg_size)
+    {
+        if (arg <= 0 || arg > 256) goto invalid_argument;
+        change_msg_max_size(to_customize, arg);
+        goto success;
+    }
+    else if (cmd == increase_max_msgs)
+    {
+        if (arg <= 0 || arg > 30) goto invalid_argument;
+        increase_max_number_of_msgs(mailslot, arg);
+        goto success;
     }
     else
     {
         printk("%s: cmd not recognized\n", DEVICE_NAME);
-        return -1;
+        goto operation_not_permitted;
     }
 
+invalid_argument:
+    return -EINVAL;
+
+operation_not_permitted:
+    return -EPERM;
+
+success:
     return 0;
 }
 
@@ -151,9 +176,6 @@ static struct file_operations fops = {
     .unlocked_ioctl = ioctl_mailslot
 #endif
 };
-
-
-
 
 
 
