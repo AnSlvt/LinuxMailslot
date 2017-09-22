@@ -27,7 +27,7 @@ typedef struct mailslot_s * mailslot_t;
 
 void create_new_mailslot(mailslot_vector_t mailslots, int device_instance);
 
-void insert_new_msg(mailslot_t mailslot, struct msg_obj_s *msg);
+int insert_new_msg(mailslot_t mailslot, struct msg_obj_s *msg);
 
 int read_msg(mailslot_t mailslot, char *buff, int len);
 
@@ -36,6 +36,10 @@ void set_behaviour(mailslot_t mailslot, mailslot_behaviour_t new_behaviour);
 void change_msg_max_size(mailslot_t mailslot, int new_size);
 
 int increase_max_number_of_msgs(mailslot_t mailslot, int new_size);
+
+int decrease_max_number_of_msgs(mailslot_t mailslot);
+
+int get_max_number_of_msgs(mailslot_t mailslot);
 
 //struct msg_obj_s *get_mail(mailslot_t mailslot, int position);
 

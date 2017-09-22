@@ -20,19 +20,6 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andrea Salvati");
 
-#define IOCTL_MAGIC 0xF70000
-#define SEQUENCE_CMD_BLOCKING 0x000100
-#define SEQUENCE_CMD_NONBLOCKING 0x001000
-#define SEQUENCE_CMD_CHANGE_MSG_SIZE 0x001100
-#define SEQUENCE_CMD_INCREASE_MAX_MSGS 0x010000
-#define SEQUENCE_CMD_DECREASE_MAX_MSGS 0x010100
-
-#define BLOCKING_CMD IOCTL_MAGIC | SEQUENCE_CMD_BLOCKING | _IOC_NONE
-#define NONBLOCKING_CMD IOCTL_MAGIC | SEQUENCE_CMD_NONBLOCKING | _IOC_NONE
-#define CHANGE_MSG_SIZE_CMD IOCTL_MAGIC | SEQUENCE_CMD_CHANGE_MSG_SIZE | _IOC_NONE
-#define INCREASE_MAX_MSGS_CMD IOCTL_MAGIC | SEQUENCE_CMD_INCREASE_MAX_MSGS | _IOC_NONE
-#define DECREASE_MAX_MSGS_CMD IOCTL_MAGIC | SEQUENCE_CMD_DECREASE_MAX_MSGS | _IOC_NONE
-
 static int Major;
 
 mailslot_vector_t mailslots;
@@ -74,7 +61,7 @@ static int mailslot_instance_release(struct inode *inode, struct file *file)
 static ssize_t write_on_mailslot(struct file *filp, const char *buff, size_t len, loff_t *off)
 {
     msg_obj_t mail;
-    int device_instance = MINOR(filp->f_inode->i_rdev);
+    int device_instance = MINOR(filp->f_inode->i_rdev), ret;
     mailslot_t mailslot = get_mailslot(mailslots, device_instance);
 
     printk("%s: somebody called a write on the mailslot istance [majors,minor] number [%d,%d]\n", 
@@ -86,11 +73,11 @@ static ssize_t write_on_mailslot(struct file *filp, const char *buff, size_t len
     if (mail == NULL)
     {
         printk("%s: the length of the message is not compatible with the mailslot\n", DEVICE_NAME);
-        return 0;
+        return -E2BIG;
     }
-    insert_new_msg(mailslot, mail);
+    ret = insert_new_msg(mailslot, mail);
 
-    return len;
+    return ret;
 }
 
 static ssize_t read_from_mailslot(struct file *filp, char *buff, size_t len, loff_t *off)
@@ -117,11 +104,14 @@ static long ioctl_mailslot(struct file *filp, unsigned int cmd, unsigned long ar
 {
     int device_instance = MINOR(filp->f_inode->i_rdev);
     mailslot_t to_customize = get_mailslot(mailslots, device_instance);
+    int ret = 0;
 
     unsigned int blocking_cmd = BLOCKING_CMD;
     unsigned int non_blocking_cmd = NONBLOCKING_CMD;
     unsigned int change_max_msg_size = CHANGE_MSG_SIZE_CMD;
     unsigned int increase_max_msgs = INCREASE_MAX_MSGS_CMD;
+    unsigned int decrease_max_msgs = DECREASE_MAX_MSGS_CMD;
+    unsigned int get_max_msgs = GET_MAX_MSGS_CMD;
 
     printk("%s: ioctl received on instance %d, the cmd is %d", DEVICE_NAME, device_instance, cmd);
 
@@ -129,40 +119,37 @@ static long ioctl_mailslot(struct file *filp, unsigned int cmd, unsigned long ar
     {
         printk("%s: customizing the running behaviour of mailslot instance %d - new behaviour %d\n", DEVICE_NAME, device_instance, BLOCKING);
         set_behaviour(to_customize, BLOCKING);
-        goto success;
     }
     else if (cmd == non_blocking_cmd)
     {
         printk("%s: customizing the running behaviour of mailslot instance %d - new behaviour %d\n", DEVICE_NAME, device_instance, NON_BLOCKING);
         set_behaviour(to_customize, NON_BLOCKING);
-        goto success;
     }
     else if (cmd == change_max_msg_size)
     {
-        if (arg <= 0 || arg > 256) goto invalid_argument;
-        change_msg_max_size(to_customize, arg);
-        goto success;
+        if (arg <= 0 || arg > 256) ret = -EINVAL;
+        else change_msg_max_size(to_customize, arg);
     }
     else if (cmd == increase_max_msgs)
     {
-        if (arg <= 0 || arg > 30) goto invalid_argument;
-        increase_max_number_of_msgs(mailslot, arg);
-        goto success;
+        if (arg <= 0 || arg > 30) ret = -EINVAL;
+        else ret = increase_max_number_of_msgs(to_customize, arg);
+    }
+    else if (cmd == decrease_max_msgs)
+    {
+        ret = decrease_max_number_of_msgs(to_customize);
+    }
+    else if (cmd == get_max_msgs)
+    {
+        ret = get_max_number_of_msgs(to_customize);
     }
     else
     {
         printk("%s: cmd not recognized\n", DEVICE_NAME);
-        goto operation_not_permitted;
+        ret = -EPERM;
     }
 
-invalid_argument:
-    return -EINVAL;
-
-operation_not_permitted:
-    return -EPERM;
-
-success:
-    return 0;
+    return ret;
 }
 
 static struct file_operations fops = {

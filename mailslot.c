@@ -53,15 +53,19 @@ void create_new_mailslot(mailslot_vector_t mailslots, int device_instance)
     else printk("%s: new mailslot created and succesfully inserted in %d\n", DEVICE_NAME, device_instance);
 }
 
-void insert_new_msg(struct mailslot_s *mailslot, msg_obj_t msg)
+int insert_new_msg(struct mailslot_s *mailslot, msg_obj_t msg)
 {
-    int locked = 0;
+    int locked = 0, ret = msg->msg_len;
 
     if (IS_BLOCKING) down(mailslot->empty);
     else
     {
         locked = down_trylock(mailslot->empty);
-        if (locked != 0) goto full;
+        if (locked != 0)
+        {
+            ret = -ENOSPC;
+            goto full;
+        }
     }
     spin_lock(mailslot->mailslot_sync);
 
@@ -73,6 +77,7 @@ void insert_new_msg(struct mailslot_s *mailslot, msg_obj_t msg)
 
 full:
     if (locked == 0) up(mailslot->full);
+    return ret;
 }
 
 int read_msg(struct mailslot_s *mailslot, char *buff, int len)
@@ -158,34 +163,52 @@ int increase_max_number_of_msgs(mailslot_t mailslot, int new_size)
     return ret;
 }
 
-/*struct msg_obj_s *get_mail(mailslot_t mailslot, int position)
+int decrease_max_number_of_msgs(mailslot_t mailslot)
 {
-    return mailslot->mails[position];
-}
+    int locked, ret = 0, j = 0, i;
+    msg_obj_t *mails_copy;
 
-int get_mails_in(mailslot_t mailslot)
-{
-    int size;
+    // TODO: atomic_t set barred value 0
     spin_lock(mailslot->mailslot_sync);
-    size = mailslot->mails_in;
+
+    // if the lock fails we do not proceed to shrink the space. notify to the user to retry later
+    locked = down_trylock(mailslot->empty);
+    if (locked != 0)
+    {
+        ret = -EAGAIN;
+        goto retry;
+    }
+
+    // reduce the space in the mailslot by one. create a copy is necessary to avoid the loss of messages
+    mails_copy = kmalloc((mailslot->current_max_msgs - 1) * sizeof(struct msg_obj_s), GFP_KERNEL);
+    if (mails_copy == NULL)
+    {
+        printk("%s: error!", DEVICE_NAME);
+        return -1;
+    }
+    for (i = mailslot->next_to_read; i < mailslot->next_to_insert; i++)
+    {
+        mails_copy[j++] = mailslot->mails[i];
+    }
+    kfree(mailslot->mails);
+    mailslot->mails = mails_copy;
+    mailslot->next_to_read = 0;
+    mailslot->next_to_insert = j;
+
+
+    mailslot->current_max_msgs = mailslot->current_max_msgs - 1;
+
+retry:
     spin_unlock(mailslot->mailslot_sync);
-    return size;
+    // TODO: atomic_t set barred value 1
+    return ret;
 }
 
-int is_length_compatible(struct mailslot_s *mailslot, int len)
+int get_max_number_of_msgs(mailslot_t mailslot)
 {
-    return len <= mailslot->current_msg_size;
+    int ret;
+    spin_lock(mailslot->mailslot_sync);
+    ret = mailslot->current_max_msgs;
+    spin_unlock(mailslot->mailslot_sync);
+    return ret;
 }
-
-int there_is_space(struct mailslot_s *mailslot)
-{
-    int size = get_mails_in(mailslot);
-    return size != mailslot->current_max_msgs;
-}
-
-int is_empty(struct mailslot_s *mailslot)
-{
-    int size = get_mails_in(mailslot);
-    return size == 0;
-}
-*/
