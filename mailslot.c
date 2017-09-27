@@ -97,9 +97,7 @@ int read_msg(struct mailslot_s *mailslot, char *buff, int len)
     to_read = mailslot->mails[mailslot->next_to_read];
 
     ret = get_msg_len(to_read);
-    copy_to_user(buff, get_msg(to_read), ret);
-
-    kfree(to_read);
+    
     mailslot->mails[mailslot->next_to_read] = NULL;
     mailslot->mails_in -= 1;
     mailslot->next_to_read = (mailslot->next_to_read + 1) % mailslot->current_max_msgs;
@@ -107,6 +105,10 @@ int read_msg(struct mailslot_s *mailslot, char *buff, int len)
     printk("%s: read %s of %d bytes\n", DEVICE_NAME, buff, ret);
 
     spin_unlock(mailslot->mailslot_sync);
+
+    copy_to_user(buff, get_msg(to_read), ret);
+    kfree(to_read);
+
     up(mailslot->empty);
 
 empty:
@@ -145,21 +147,44 @@ void change_msg_max_size(mailslot_t mailslot, int new_size)
 int increase_max_number_of_msgs(mailslot_t mailslot, int new_size)
 {
     int ret = 0, i, old_size;
+    msg_obj_t *mails_copy;
+
+    mails_copy = kmalloc(new_size * sizeof(struct msg_obj_s), GFP_KERNEL);
+    if (mails_copy == NULL)
+    {
+        printk("%s: error!", DEVICE_NAME);
+        ret = -ENOMEM;
+        goto end;
+    }
+
     spin_lock(mailslot->mailslot_sync);
 
-    if (new_size <= mailslot->current_max_msgs) ret = -EINVAL;
+    if (new_size <= mailslot->current_max_msgs)
+    {
+        ret = -EINVAL;
+        kfree(mails_copy);
+    }
     else
     {
-        // I have more space in the buffer - first realloc the buffer and then unlock all the writers 
-        // that want to use the new space
+        // I have more space in the buffer - copy the content of the mailslot in the new buffer
+        // and then unlock all the writers that want to use the new space
         old_size = mailslot->current_max_msgs;
         mailslot->current_max_msgs = new_size;
-        krealloc(mailslot->mails, new_size, GFP_KERNEL);
+
+        for (i = mailslot->next_to_read; i < mailslot->next_to_insert; i++)
+        {
+            mails_copy[i] = mailslot->mails[i];
+        }
+        kfree(mailslot->mails);
+        mailslot->mails = mails_copy;
+
         for (i = old_size; i < new_size; i++)
             up(mailslot->empty);
     }
 
     spin_unlock(mailslot->mailslot_sync);
+
+end:
     return ret;
 }
 
@@ -168,7 +193,15 @@ int decrease_max_number_of_msgs(mailslot_t mailslot)
     int locked, ret = 0, j = 0, i;
     msg_obj_t *mails_copy;
 
-    // TODO: atomic_t set barred value 0
+    // reduce the space in the mailslot by one. create a copy is necessary to avoid the loss of messages
+    mails_copy = kmalloc((mailslot->current_max_msgs - 1) * sizeof(struct msg_obj_s), GFP_KERNEL);
+    if (mails_copy == NULL)
+    {
+        printk("%s: error!", DEVICE_NAME);
+        ret = -ENOMEM;
+        goto end;
+    }
+
     spin_lock(mailslot->mailslot_sync);
 
     // if the lock fails we do not proceed to shrink the space. notify to the user to retry later
@@ -176,20 +209,31 @@ int decrease_max_number_of_msgs(mailslot_t mailslot)
     if (locked != 0)
     {
         ret = -EAGAIN;
+        kfree(mails_copy);
         goto retry;
     }
 
-    // reduce the space in the mailslot by one. create a copy is necessary to avoid the loss of messages
-    mails_copy = kmalloc((mailslot->current_max_msgs - 1) * sizeof(struct msg_obj_s), GFP_KERNEL);
-    if (mails_copy == NULL)
+    // handle the circularity of the buffer
+    if (mailslot->next_to_insert >= mailslot->next_to_read)
     {
-        printk("%s: error!", DEVICE_NAME);
-        return -1;
+        for (i = mailslot->next_to_read; i < mailslot->next_to_insert; i++)
+        {
+            mails_copy[j++] = mailslot->mails[i];
+        }
     }
-    for (i = mailslot->next_to_read; i < mailslot->next_to_insert; i++)
+    else
     {
-        mails_copy[j++] = mailslot->mails[i];
+        for (i = mailslot->next_to_read; i < mailslot->current_max_msgs; i++)
+        {
+            mails_copy[j++] = mailslot->mails[i];
+        }
+
+        for (i = 0; i < mailslot->next_to_insert; i++)
+        {
+            mails_copy[j++] = mailslot->mails[i];
+        }
     }
+
     kfree(mailslot->mails);
     mailslot->mails = mails_copy;
     mailslot->next_to_read = 0;
@@ -200,7 +244,7 @@ int decrease_max_number_of_msgs(mailslot_t mailslot)
 
 retry:
     spin_unlock(mailslot->mailslot_sync);
-    // TODO: atomic_t set barred value 1
+end:
     return ret;
 }
 

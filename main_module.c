@@ -69,14 +69,15 @@ static ssize_t write_on_mailslot(struct file *filp, const char *buff, size_t len
         MAJOR(filp->f_inode->i_rdev), 
         device_instance);
 
-    mail = create_new_msg(mailslot, buff, len);
+    mail = create_new_msg(mailslot, buff, len, &ret);
     if (mail == NULL)
     {
         printk("%s: the length of the message is not compatible with the mailslot\n", DEVICE_NAME);
-        return -E2BIG;
+        goto end;
     }
     ret = insert_new_msg(mailslot, mail);
 
+end:
     return ret;
 }
 
@@ -177,7 +178,7 @@ int init_module(void)
     }
 
     mailslots = create_new_mailslot_vector();
-    if (mailslots == NULL) return -1;
+    if (mailslots == NULL) return -ENOMEM;
 
     printk(KERN_INFO "mail_slot device registered, it is assigned major number %d\n", Major);
 

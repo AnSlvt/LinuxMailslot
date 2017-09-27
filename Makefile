@@ -6,8 +6,8 @@ all:
 
 install:
 	sudo insmod mailslot_module.ko
-	sudo mknod mail c 245 0
-	sudo chmod 666 mail
+#	sudo mknod mail c 245 0
+#	sudo chmod 666 mail
 
 redo:
 	rm -Rf mail
