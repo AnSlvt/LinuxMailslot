@@ -98,18 +98,30 @@ int read_msg(struct mailslot_s *mailslot, char *buff, int len)
 
     ret = get_msg_len(to_read);
     
-    mailslot->mails[mailslot->next_to_read] = NULL;
-    mailslot->mails_in -= 1;
-    mailslot->next_to_read = (mailslot->next_to_read + 1) % mailslot->current_max_msgs;
+    // if the message length is compatible with the read size...
+    if (ret <= len)
+    {
+        mailslot->mails[mailslot->next_to_read] = NULL;
+        mailslot->mails_in -= 1;
+        mailslot->next_to_read = (mailslot->next_to_read + 1) % mailslot->current_max_msgs;
 
-    printk("%s: read %s of %d bytes\n", DEVICE_NAME, buff, ret);
+        printk("%s: read %s of %d bytes\n", DEVICE_NAME, buff, ret);
 
-    spin_unlock(mailslot->mailslot_sync);
+        spin_unlock(mailslot->mailslot_sync);
 
-    copy_to_user(buff, get_msg(to_read), ret);
-    kfree(to_read);
+        // ... return the message to the user
+        copy_to_user(buff, get_msg(to_read), ret);
+        kfree(to_read);
 
-    up(mailslot->empty);
+        up(mailslot->empty);
+    }
+    else
+    {
+        // the requested length is too small, get back to sleep and awake another reader that might have a right request
+        spin_unlock(mailslot->mailslot_sync);
+        up(mailslot->full);
+        ret = -EAGAIN;
+    }
 
 empty:
     return ret;
