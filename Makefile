@@ -9,8 +9,8 @@ install:
 #	sudo mknod mail c 245 0
 #	sudo chmod 666 mail
 
-redo:
-	rm -Rf mail
+uninstall:
+#	rm -Rf mail
 	sudo rmmod mailslot_module
 
 clean:
