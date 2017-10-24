@@ -7,8 +7,8 @@ The device file needs to be multi-instance (by having the possibility to manage 
 The device file needs to also support ioctl commands in order to define the run time behavior of any I/O session targeting it (such as whether read and/or write operations on a session need to be performed according to blocking or non-blocking rules). 
 
 Parameters that are left to the designer, which should be selected via reasonable policies, are: 
-    * the maximum size of managed data-units (this might also be made tunable via ioctl up to an absolute upper limit) 
-    * the maximum storage that can be (dynamically) reserved for any individual mail slot 
-	* the range of device file minor numbers supported by the driver (it could be the interval [0-255] or not) 
+* the maximum size of managed data-units (this might also be made tunable via ioctl up to an absolute upper limit) 
+* the maximum storage that can be (dynamically) reserved for any individual mail slot 
+* the range of device file minor numbers supported by the driver (it could be the interval [0-255] or not) 
 
 NOTE: this project deals with implementing within Linux services similar to those that are offered by Windows "mail slots", which is the reason for the selected project name 
