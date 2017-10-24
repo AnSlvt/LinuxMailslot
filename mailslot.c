@@ -69,10 +69,17 @@ int insert_new_msg(struct mailslot_s *mailslot, msg_obj_t msg)
     }
     spin_lock(mailslot->mailslot_sync);
 
+    if (get_msg_len(msg) > mailslot->current_msg_size)
+    {
+        ret = -E2BIG;
+        goto size_issue;
+    }
+
     mailslot->mails[mailslot->next_to_insert] = msg;
     mailslot->mails_in += 1;
     mailslot->next_to_insert = (mailslot->next_to_insert + 1) % mailslot->current_max_msgs;
 
+size_issue:
     spin_unlock(mailslot->mailslot_sync);
 
 full:
