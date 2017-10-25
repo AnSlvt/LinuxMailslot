@@ -116,11 +116,11 @@ int read_msg(struct mailslot_s *mailslot, char *buff, int len)
 
         spin_unlock(mailslot->mailslot_sync);
 
+        up(mailslot->empty);
+
         // ... return the message to the user
         copy_to_user(buff, get_msg(to_read), ret);
         kfree(to_read);
-
-        up(mailslot->empty);
     }
     else
     {
